@@ -2,6 +2,7 @@
 
 import { isApiError } from '@/lib/api-error';
 import { useRepoList, useRepoSignals } from '@/lib/query/hooks';
+import { relativeTime } from '@/lib/transforms/relative-time';
 import type { RepoSummary } from '@/lib/types';
 import { CiBadge } from './ci-badge';
 import { RowSkeleton } from './skeleton';
@@ -11,6 +12,12 @@ const countFormat = new Intl.NumberFormat('en-US');
 
 function formatCount(n: number): string {
   return countFormat.format(n);
+}
+
+// Clock read lives here (module scope, same pattern as detail-drawer's
+// relativePush) so render stays pure for the compiler lint rules.
+function relativePush(iso: string): string {
+  return relativeTime(iso, Date.now());
 }
 
 // GitHub repo list for the configured user. Infinite query with a Load more
@@ -121,8 +128,35 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
         <span>{formatCount(repo.openIssuePrCount)} open issues + PRs</span>
         {repo.language !== null && <span>{repo.language}</span>}
         {repo.licenseSpdx !== null && <span>{repo.licenseSpdx}</span>}
-        {repo.lastPushAt !== null && <span>last push {repo.lastPushAt.slice(0, 10)}</span>}
+        <span className="inline-flex items-center gap-1 font-mono">
+          <BranchIcon />
+          {repo.defaultBranch}
+        </span>
+        {repo.lastPushAt !== null && (
+          <span title={repo.lastPushAt}>last push {relativePush(repo.lastPushAt)}</span>
+        )}
       </div>
     </li>
+  );
+}
+
+// Small git-branch glyph for the default branch line (SVG, ASCII only).
+function BranchIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="11"
+      height="11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="4.5" cy="3.5" r="2" />
+      <circle cx="4.5" cy="12.5" r="2" />
+      <circle cx="11.5" cy="5.5" r="2" />
+      <path d="M4.5 5.5v5M11.5 7.5c0 2.2-3.2 1.8-4.6 3.4" />
+    </svg>
   );
 }

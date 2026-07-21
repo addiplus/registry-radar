@@ -51,7 +51,7 @@ export function PackageGrid({ scope, onOpenPackage }: PackageGridProps) {
         <StaleBanner message="Showing cached data. Refresh failed, retry shortly." />
       )}
       <p className="mb-3 text-xs text-muted">
-        {`${packages.length} packages in ${scope}`}
+        {`${packages.length} package${packages.length === 1 ? "" : "s"} in ${scope}`}
       </p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {packages.map((summary) => (
