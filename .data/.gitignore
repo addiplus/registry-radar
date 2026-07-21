@@ -1,0 +1,3 @@
+# Local watchlist data lives here. Keep the directory, ignore the contents.
+*
+!.gitignore
