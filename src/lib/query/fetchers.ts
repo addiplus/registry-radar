@@ -58,15 +58,15 @@ export function fetchScopePackages(scope: string): Promise<ScopePackagesResponse
 }
 
 export function fetchPackageMeta(name: string): Promise<PackageMeta> {
-  return request(`/api/package/${encodeURIComponent(name)}/meta`);
+  return request(`/api/package/meta/${encodeURIComponent(name)}`);
 }
 
 export function fetchVersionPage(name: string, offset: number, limit: number): Promise<VersionPage> {
-  return request(`/api/package/${encodeURIComponent(name)}/versions?offset=${offset}&limit=${limit}`);
+  return request(`/api/package/versions/${encodeURIComponent(name)}?offset=${offset}&limit=${limit}`);
 }
 
 export function fetchDownloads(name: string, days: DownloadDays): Promise<DownloadSeries> {
-  return request(`/api/package/${encodeURIComponent(name)}/downloads?range=${days}`);
+  return request(`/api/package/downloads/${encodeURIComponent(name)}?range=${days}`);
 }
 
 // GitHub routes (Module C)

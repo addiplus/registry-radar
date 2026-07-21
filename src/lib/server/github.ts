@@ -2,48 +2,28 @@ import { NextResponse } from 'next/server';
 
 import { ApiError, isApiError } from '@/lib/api-error';
 import { gitHubError } from '@/lib/transforms/errors';
+import {
+  filterUserRepos,
+  toRepoSignals,
+  toRepoSummary,
+  type GitHubRepoDto,
+  type GitHubWorkflowRunsDto,
+} from '@/lib/transforms/repo-signals';
 import type {
   ApiErrorBody,
-  CiStatus,
   GitHubEnvelope,
   RateLimitInfo,
   RepoListPage,
   RepoSignals,
-  RepoSummary,
 } from '@/lib/types';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const REVALIDATE_SECONDS = 300;
 
-// Minimal shapes for the GitHub REST payloads this app consumes.
-// Only the fields actually read are declared.
-interface GitHubRepoDto {
-  name: string;
-  full_name: string;
-  description: string | null;
-  html_url: string;
-  stargazers_count: number;
-  forks_count: number;
-  open_issues_count: number;
-  language: string | null;
-  license: { spdx_id: string | null } | null;
-  default_branch: string;
-  pushed_at: string | null;
-  archived: boolean;
-  fork: boolean;
-}
-
-interface GitHubWorkflowRunDto {
-  status: string | null;
-  conclusion: string | null;
-  html_url: string | null;
-  updated_at: string | null;
-}
-
-interface GitHubWorkflowRunsDto {
-  total_count: number;
-  workflow_runs: GitHubWorkflowRunDto[];
-}
+// DTO types and payload mapping (toRepoSummary, toCiStatus, toRepoSignals,
+// filterUserRepos) live in src/lib/transforms/repo-signals.ts, the tested
+// truth; this module keeps only the server-only work: fetch, auth, rate-limit
+// header reading, error mapping, and cache headers.
 
 interface GitHubFetchResult<T> {
   data: T;
@@ -125,38 +105,6 @@ export async function gitHubFetch<T>(
   return { data, rateLimit, headers: res.headers };
 }
 
-function toRepoSummary(dto: GitHubRepoDto): RepoSummary {
-  return {
-    name: dto.name,
-    fullName: dto.full_name,
-    description: dto.description ?? null,
-    url: dto.html_url,
-    stars: dto.stargazers_count,
-    forks: dto.forks_count,
-    openIssuePrCount: dto.open_issues_count,
-    language: dto.language ?? null,
-    licenseSpdx: dto.license?.spdx_id ?? null,
-    defaultBranch: dto.default_branch,
-    lastPushAt: dto.pushed_at ?? null,
-    archived: dto.archived,
-  };
-}
-
-function toCiStatus(dto: GitHubWorkflowRunsDto): CiStatus {
-  if (dto.total_count === 0) return { kind: 'none' };
-  const run = dto.workflow_runs[0];
-  if (!run) return { kind: 'none' };
-  if (run.status !== 'completed') {
-    return { kind: 'running', url: run.html_url ?? null };
-  }
-  return {
-    kind: 'completed',
-    conclusion: run.conclusion ?? 'unknown',
-    url: run.html_url ?? null,
-    at: run.updated_at ?? null,
-  };
-}
-
 export async function listUserRepos(
   user: string,
   page: number,
@@ -164,14 +112,7 @@ export async function listUserRepos(
   const result = await gitHubFetch<GitHubRepoDto[]>(
     `/users/${encodeURIComponent(user)}/repos?per_page=100&type=owner&sort=updated&page=${page}`,
   );
-  const lowered = user.toLowerCase();
-  const items = result.data
-    .filter((dto) => dto.fork === false)
-    .filter((dto) => {
-      const name = dto.name.toLowerCase();
-      return name !== lowered && name !== `${lowered}.github.io`;
-    })
-    .map(toRepoSummary);
+  const items = filterUserRepos(result.data, user).map(toRepoSummary);
   const link = result.headers.get('link');
   const nextPage = link !== null && link.includes('rel="next"') ? page + 1 : null;
   return { data: { items, nextPage }, rateLimit: result.rateLimit };
@@ -191,7 +132,7 @@ export async function getRepoSignals(
     `/repos/${safeOwner}/${safeRepo}/actions/runs?branch=${encodeURIComponent(summary.defaultBranch)}&per_page=1`,
   );
   return {
-    data: { ...summary, ci: toCiStatus(runsResult.data) },
+    data: toRepoSignals(repoResult.data, runsResult.data),
     rateLimit: runsResult.rateLimit,
   };
 }

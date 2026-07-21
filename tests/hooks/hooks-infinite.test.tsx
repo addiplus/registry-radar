@@ -58,14 +58,14 @@ describe('useVersionHistory', () => {
     expect(result.current.data?.pages).toHaveLength(1);
     expect(result.current.data?.pages[0]).toEqual(PAGE_0);
     expect(result.current.hasNextPage).toBe(true);
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/package/pkg-a/versions?offset=0&limit=20');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/package/versions/pkg-a?offset=0&limit=20');
 
     await act(async () => {
       await result.current.fetchNextPage();
     });
     await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
     expect(result.current.data?.pages[1]).toEqual(PAGE_1);
-    expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/api/package/pkg-a/versions?offset=2&limit=20');
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe('/api/package/versions/pkg-a?offset=2&limit=20');
 
     // nextOffset null on the last page: no further page is offered.
     expect(result.current.hasNextPage).toBe(false);

@@ -9,6 +9,7 @@ import {
   useVersionHistory,
   useWatchlist,
 } from '@/lib/query/hooks';
+import { relativeTime } from '@/lib/transforms/relative-time';
 import type { DownloadDays, VersionEntry } from '@/lib/types';
 import { CiBadge } from './ci-badge';
 import { NoteEditor } from './note-editor';
@@ -33,6 +34,12 @@ function formatBytes(bytes: number | null): string {
 
 function formatDate(iso: string | null): string {
   return iso === null ? '-' : iso.slice(0, 10);
+}
+
+// Clock read lives here (module scope, same pattern as package-card's
+// relativePublish) so render stays pure for the compiler lint rules.
+function relativePush(iso: string): string {
+  return relativeTime(iso, Date.now());
 }
 
 const RANGE_OPTIONS: DownloadDays[] = [7, 30, 90];
@@ -231,8 +238,14 @@ function DrawerContent({ name, onClose }: { name: string; onClose: () => void })
                     <span>{formatCount(signals.data.openIssuePrCount)} open issues + PRs</span>
                     {signals.data.language !== null && <span>{signals.data.language}</span>}
                     {signals.data.licenseSpdx !== null && <span>{signals.data.licenseSpdx}</span>}
+                    <span className="inline-flex items-center gap-1 font-mono">
+                      <BranchIcon />
+                      {signals.data.defaultBranch}
+                    </span>
                     {signals.data.lastPushAt !== null && (
-                      <span>last push {signals.data.lastPushAt.slice(0, 10)}</span>
+                      <span title={signals.data.lastPushAt}>
+                        last push {relativePush(signals.data.lastPushAt)}
+                      </span>
                     )}
                     {signals.data.archived && <span>archived</span>}
                   </div>
@@ -301,6 +314,27 @@ function Fact({ label, value }: { label: string; value: string }) {
       <dt className="text-xs text-zinc-500 dark:text-zinc-400">{label}</dt>
       <dd className="text-sm text-zinc-900 dark:text-zinc-100">{value}</dd>
     </div>
+  );
+}
+
+// Small git-branch glyph for the default branch line (SVG, ASCII only).
+function BranchIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="11"
+      height="11"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="4.5" cy="3.5" r="2" />
+      <circle cx="4.5" cy="12.5" r="2" />
+      <circle cx="11.5" cy="5.5" r="2" />
+      <path d="M4.5 5.5v5M11.5 7.5c0 2.2-3.2 1.8-4.6 3.4" />
+    </svg>
   );
 }
 

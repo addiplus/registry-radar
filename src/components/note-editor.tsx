@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { isApiError } from '@/lib/api-error';
 import { NOTE_MAX_LENGTH } from '@/lib/constants';
 import { useNoteMutation } from '@/lib/query/mutations';
@@ -11,18 +11,22 @@ import { useNoteMutation } from '@/lib/query/mutations';
 // the user's text and shows an error, so nothing they typed is lost.
 export function NoteEditor({ name, note }: { name: string; note: string | null }) {
   const [draft, setDraft] = useState(note ?? '');
+  const [syncedNote, setSyncedNote] = useState(note);
   const mutation = useNoteMutation();
 
-  // Resync the draft from the server value only while the mutation is idle.
-  // On error (the rollback moment) this effect stays hands off, and after a
-  // successful save the stored note equals the trimmed draft anyway, so the
-  // only time the draft is replaced is a genuinely external change.
-  useEffect(() => {
+  // Resync the draft from the server value only while the mutation is idle,
+  // via the "adjusting state during render" pattern from the React docs:
+  // when the note prop changes, state is adjusted synchronously during this
+  // render and React re-renders before committing. On error (the rollback
+  // moment) and mid-save this stays hands off, and after a successful save
+  // the stored note equals the trimmed draft anyway, so the only time the
+  // draft is replaced is a genuinely external change.
+  if (syncedNote !== note) {
+    setSyncedNote(note);
     if (!mutation.isPending && !mutation.isError) {
       setDraft(note ?? '');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note]);
+  }
 
   const dirty = draft.trim() !== (note ?? '');
 

@@ -1,17 +1,25 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 import { ApiError, isApiError } from '@/lib/api-error';
+import {
+  buildNinetyDayRange,
+  toDownloadSeries,
+  type NpmDownloadsRange,
+} from '@/lib/transforms/downloads';
 import { httpStatusFor, npmError } from '@/lib/transforms/errors';
+import {
+  paginateVersions,
+  toPackageMeta,
+  versionHistory,
+  type Packument,
+} from '@/lib/transforms/packument';
 import type {
   ApiErrorBody,
   DownloadDays,
-  DownloadPoint,
   DownloadSeries,
   PackageMeta,
   PackageSummary,
-  RepoRef,
   ScopePackagesResponse,
-  VersionEntry,
   VersionPage,
 } from '@/lib/types';
 
@@ -30,13 +38,13 @@ export const NPM_REVALIDATE = {
 
 const SEARCH_PAGE_SIZE = 250;
 const SEARCH_MAX_PAGES = 4;
-const SEMVER_KEY = /^\d+\.\d+\.\d+/;
-const MCP_SDK = '@modelcontextprotocol/sdk';
-const NINETY_DAY_SPAN_MS = 89 * 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // JSON narrowing helpers. Upstream payloads are untyped, so every field is
-// read through these instead of being trusted (recon 01 gotcha 8).
+// read through these instead of being trusted (recon 01 gotcha 8). Mapping
+// itself lives in src/lib/transforms/ (the tested truth); these helpers remain
+// for the search payload, which has no transform twin, and for the boundary
+// shape checks before values are cast into the transform input types.
 // ---------------------------------------------------------------------------
 
 function rec(value: unknown): Record<string, unknown> | null {
@@ -54,79 +62,6 @@ function num(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function binKeys(value: unknown): string[] {
-  const record = rec(value);
-  if (record) return Object.keys(record);
-  // Very old manifests use a bare string bin; the executable name is the package name.
-  return typeof value === 'string' && value.length > 0 ? [''] : [];
-}
-
-function licenseOf(versionDoc: Record<string, unknown> | null): string | null {
-  if (!versionDoc) return null;
-  const direct = str(versionDoc.license);
-  if (direct) return direct;
-  // Very old manifests use { type: 'MIT', url: '...' }.
-  return str(rec(versionDoc.license)?.type);
-}
-
-// ---------------------------------------------------------------------------
-// Repository URL parsing (recon 01 gotcha 9, plan section 10 cases 8 to 16).
-// Only GitHub URLs produce a RepoRef; anything else returns null.
-// ---------------------------------------------------------------------------
-
-function parseRepoRef(repository: unknown): RepoRef | null {
-  let rawUrl: string | null = null;
-  let directory: string | null = null;
-  const record = rec(repository);
-  if (record) {
-    rawUrl = str(record.url);
-    directory = str(record.directory);
-  } else {
-    rawUrl = str(repository);
-  }
-  if (!rawUrl) return null;
-
-  const value = rawUrl.trim();
-  const match =
-    /^github:([^/\s]+)\/([^/\s]+)$/.exec(value) ??
-    /^git@github\.com:([^/]+)\/([^/]+)$/.exec(value) ??
-    /^(?:git\+)?(?:https?|git|ssh):\/\/(?:git@)?(?:www\.)?github\.com\/([^/]+)\/([^/]+?)\/?$/i.exec(value) ??
-    /^([\w.-]+)\/([\w.-]+)$/.exec(value);
-  if (!match) return null;
-
-  const owner = (match[1] ?? '').toLowerCase();
-  const repo = (match[2] ?? '').replace(/\.git$/i, '').toLowerCase();
-  if (!owner || !repo) return null;
-  return { owner, repo, url: `https://github.com/${owner}/${repo}`, directory };
-}
-
-// ---------------------------------------------------------------------------
-// MCP derivation (plan section 7, rules evaluated in order).
-// ---------------------------------------------------------------------------
-
-interface McpSignals {
-  isMcp: boolean;
-  mcpRegistryName: string | null;
-  hasCliBin: boolean;
-}
-
-function mcpSignals(latestDoc: Record<string, unknown> | null, doc: Record<string, unknown>): McpSignals {
-  const deps = rec(latestDoc?.dependencies);
-  const devDeps = rec(latestDoc?.devDependencies);
-  const keys = binKeys(latestDoc?.bin);
-  const mcpRegistryName = str(latestDoc?.mcpName) ?? str(doc.mcpName);
-
-  let isMcp = false;
-  if ((deps !== null && MCP_SDK in deps) || (devDeps !== null && MCP_SDK in devDeps)) {
-    isMcp = true;
-  } else if (mcpRegistryName !== null) {
-    isMcp = true;
-  } else if (keys.some((key) => /mcp/i.test(key))) {
-    isMcp = true;
-  }
-  return { isMcp, mcpRegistryName, hasCliBin: keys.length > 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -173,85 +108,36 @@ function downloadsPath(name: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Packument fetch and transforms. Meta and versions share one fetch, so the
-// Next data cache dedupes them (plan section 3).
+// Packument fetch. Meta and versions share one fetch, so the Next data cache
+// dedupes them (plan section 3). All packument mapping is delegated to the
+// shared transforms; only deliberate server-only guards live here.
 // ---------------------------------------------------------------------------
 
 interface PackumentResult {
-  doc: Record<string, unknown>;
+  doc: Packument;
   etag: string | null;
 }
 
 async function fetchPackument(name: string): Promise<PackumentResult> {
   const { json, etag } = await npmGet(`${REGISTRY_HOST}/${registryPath(name)}`, NPM_REVALIDATE.meta);
-  const doc = rec(json);
-  if (!doc) throw upstreamError(502);
-  return { doc, etag };
+  if (rec(json) === null) throw upstreamError(502);
+  // Shape-checked above; from here the payload is read through the Packument
+  // lens, whose every field is optional so junk reads as undefined.
+  return { doc: json as Packument, etag };
 }
 
-function packageMetaFromPackument(doc: Record<string, unknown>, requestedName: string): PackageMeta {
-  const distTags = rec(doc['dist-tags']);
-  const latest = str(distTags?.latest);
-  const versions = rec(doc.versions);
-  const time = rec(doc.time);
-  const latestDoc = latest !== null ? rec(versions?.[latest]) : null;
+function metaFromPackument(doc: Packument, requestedName: string): PackageMeta {
+  // Deliberate server contract kept around the transform: a packument without
+  // a usable dist-tags.latest is a malformed upstream response (502 UPSTREAM),
+  // not a renderable package. The transform throws a bare Error here instead,
+  // which would not carry the ApiError status/code contract.
+  const latest = str(rec(doc['dist-tags'])?.latest);
+  const latestDoc = latest !== null ? rec(doc.versions?.[latest]) : null;
   if (latest === null || latestDoc === null) throw upstreamError(502);
-
-  const mcp = mcpSignals(latestDoc, doc);
-  const deps = rec(latestDoc.dependencies);
-  const dist = rec(latestDoc.dist);
-  // time mixes created/modified with per version keys; count semver keys only.
-  const versionCount = Object.keys(time ?? versions ?? {}).filter((key) => SEMVER_KEY.test(key)).length;
-
-  return {
-    name: str(doc.name) ?? str(latestDoc.name) ?? requestedName,
-    description: str(doc.description) ?? str(latestDoc.description),
-    latestVersion: latest,
-    license: licenseOf(latestDoc),
-    createdAt: str(time?.created),
-    lastPublishAt: str(time?.[latest]),
-    repo: parseRepoRef(doc.repository ?? latestDoc.repository),
-    isMcp: mcp.isMcp,
-    mcpRegistryName: mcp.mcpRegistryName,
-    hasCliBin: mcp.hasCliBin,
-    dependencyCount: deps ? Object.keys(deps).length : 0,
-    unpackedSize: num(dist?.unpackedSize),
-    versionCount,
-  };
-}
-
-function versionEntries(doc: Record<string, unknown>): VersionEntry[] {
-  const versions = rec(doc.versions);
-  const time = rec(doc.time);
-  const names = Object.keys(time ?? versions ?? {}).filter((key) => SEMVER_KEY.test(key));
-
-  const entries: VersionEntry[] = names.map((version) => {
-    const vdoc = rec(versions?.[version]);
-    const deps = rec(vdoc?.dependencies);
-    const devDeps = rec(vdoc?.devDependencies);
-    const dist = rec(vdoc?.dist);
-    const engines = rec(vdoc?.engines);
-    return {
-      version,
-      publishedAt: str(time?.[version]),
-      license: licenseOf(vdoc),
-      dependencyCount: deps ? Object.keys(deps).length : 0,
-      devDependencyCount: devDeps ? Object.keys(devDeps).length : 0,
-      unpackedSize: num(dist?.unpackedSize),
-      fileCount: num(dist?.fileCount),
-      hasBin: binKeys(vdoc?.bin).length > 0,
-      enginesNode: str(engines?.node),
-    };
-  });
-
-  // Newest first; versions without a timestamp sort last with publishedAt null.
-  entries.sort((a, b) => {
-    if (a.publishedAt !== null && b.publishedAt !== null) return b.publishedAt.localeCompare(a.publishedAt);
-    if (a.publishedAt !== null) return -1;
-    if (b.publishedAt !== null) return 1;
-    return 0;
-  });
-  return entries;
+  const meta = toPackageMeta(doc);
+  // Registry packuments always carry name; when one does not, the requested
+  // name is a better fallback than the transform's ''.
+  return meta.name !== '' ? meta : { ...meta, name: requestedName };
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +199,7 @@ export async function listScopePackages(scope: string): Promise<ScopePackagesRes
 
 export async function getPackageMetaResult(name: string): Promise<PackageMetaResult> {
   const { doc, etag } = await fetchPackument(name);
-  return { meta: packageMetaFromPackument(doc, name), etag };
+  return { meta: metaFromPackument(doc, name), etag };
 }
 
 export async function getPackageMeta(name: string): Promise<PackageMeta> {
@@ -323,44 +209,18 @@ export async function getPackageMeta(name: string): Promise<PackageMeta> {
 
 export async function getVersionPageResult(name: string, offset: number, limit: number): Promise<VersionPageResult> {
   const { doc, etag } = await fetchPackument(name);
-  const entries = versionEntries(doc);
-  const items = entries.slice(offset, offset + limit);
-  const end = offset + items.length;
-  const page: VersionPage = { items, total: entries.length, nextOffset: end < entries.length ? end : null };
+  const page = paginateVersions(versionHistory(doc), offset, limit);
   return { page, etag };
 }
 
 async function fetchRange(name: string, period: string, days: DownloadDays): Promise<DownloadSeries> {
   const { json } = await npmGet(`${DOWNLOADS_HOST}/downloads/range/${period}/${downloadsPath(name)}`, NPM_REVALIDATE.downloads);
-  const doc = rec(json);
-  if (!doc) throw upstreamError(502);
-  const list = Array.isArray(doc.downloads) ? doc.downloads : [];
-
-  const points: DownloadPoint[] = [];
-  for (const item of list) {
-    const entry = rec(item);
-    const day = str(entry?.day);
-    const downloads = num(entry?.downloads);
-    if (day !== null && downloads !== null) points.push({ day, downloads });
-  }
-  const total = points.reduce((sum, point) => sum + point.downloads, 0);
-
+  if (rec(json) === null) throw upstreamError(502);
   // start and end come from the API response, never from the request: the
   // range endpoint silently clamps and stats lag 1 to 2 days (recon 01).
-  return {
-    packageName: str(doc.package) ?? name,
-    days,
-    start: str(doc.start) ?? '',
-    end: str(doc.end) ?? '',
-    total,
-    points,
-  };
-}
-
-function ninetyDayStart(end: string): string {
-  const endMs = Date.parse(`${end}T00:00:00.000Z`);
-  if (Number.isNaN(endMs)) throw upstreamError(502);
-  return new Date(endMs - NINETY_DAY_SPAN_MS).toISOString().slice(0, 10);
+  const series = toDownloadSeries(json as NpmDownloadsRange, days);
+  // The payload normally echoes the package name; fall back to the request.
+  return series.packageName !== '' ? series : { ...series, packageName: name };
 }
 
 export async function getDownloadSeries(name: string, days: DownloadDays): Promise<DownloadSeries> {
@@ -369,8 +229,9 @@ export async function getDownloadSeries(name: string, days: DownloadDays): Promi
   // No 90 day token exists (recon 01 gotcha 3): anchor a custom inclusive range
   // off the end day the API actually reports, never off Date.now().
   const probe = await fetchRange(name, 'last-week', 7);
-  const start = ninetyDayStart(probe.end);
-  return fetchRange(name, `${start}:${probe.end}`, 90);
+  if (Number.isNaN(Date.parse(`${probe.end}T00:00:00.000Z`))) throw upstreamError(502);
+  const range = buildNinetyDayRange(probe.end);
+  return fetchRange(name, `${range.start}:${range.end}`, 90);
 }
 
 // ---------------------------------------------------------------------------
