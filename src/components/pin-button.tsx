@@ -12,7 +12,7 @@ import { usePinMutation } from '@/lib/query/mutations';
 // optimistic flip is what would arm a second click, and a fast Pin -> Unpin
 // double click races POST against DELETE over separate connections, which can
 // leave the server in the state opposite the user's last intent. Disabling
-// does not delay the first click's optimistic flip — that comes from the
+// does not delay the first click's optimistic flip: that comes from the
 // cache write in onMutate, not from the network.
 export function PinButton({ name }: { name: string }) {
   const watchlist = useWatchlist();

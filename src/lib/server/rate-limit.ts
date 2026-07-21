@@ -6,7 +6,7 @@ import type { ApiErrorBody } from '@/lib/types';
 // Lightweight per-IP fixed-window rate limiter for the public proxy routes
 // (security fix G1, review F1). In-memory and per-instance by design: on
 // serverless, each warm instance keeps its own counters, so this is a soft
-// limit that blunts casual abuse rather than a hard global quota — acceptable
+// limit that blunts casual abuse rather than a hard global quota, acceptable
 // for v1; swap for a shared store (e.g. Upstash Ratelimit) if a hard limit is
 // ever required. No dependencies.
 // ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ export function rateLimitMaxFromEnv(fallback: number): number {
 }
 
 // Cached on globalThis so dev HMR does not recreate (and reset) the limiters
-// on every reload — same pattern as the watchlist store factory.
+// on every reload, using the same pattern as the watchlist store factory.
 const globalForRateLimit = globalThis as typeof globalThis & {
   __registryRadarGitHubRateLimiter?: RateLimiter;
   __registryRadarNpmRateLimiter?: RateLimiter;

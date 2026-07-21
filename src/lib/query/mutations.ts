@@ -12,7 +12,7 @@ import { qk } from './keys';
 // Refinement for overlapping mutations: every optimistic write stamps a
 // monotonically increasing version into its mutation context, tracked per
 // query key. onError restores the snapshot only when this mutation still
-// holds the latest version for the key — i.e. no newer optimistic mutation
+// holds the latest version for the key, i.e. no newer optimistic mutation
 // has started since this one began. Otherwise the restore is skipped, because
 // rolling back would clobber the newer mutation's optimistic write with stale
 // state; the surviving mutation's own onSettled invalidation converges the

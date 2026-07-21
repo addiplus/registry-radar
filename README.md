@@ -69,7 +69,7 @@ The app works with zero configuration: the watchlist falls back to a local JSON 
 npm run test:run
 ```
 
-48 tests across 12 files, all passing. The suites cover the pure transforms (packument mapping, download series math, repo URL parsing, MCP badge rules, error mapping, Markdown export, relative time), the JSON file watchlist store (pin/note roundtrip, corrupt file quarantine, concurrent writes), and the TanStack Query hooks with a mocked fetch, including an optimistic rollback test that asserts the cache both mid flight and after rejection. CI runs the same suite on every push to main and on pull requests via GitHub Actions (`.github/workflows/ci.yml`).
+142 tests across 16 files, all passing. The suites cover the pure transforms (packument mapping, download series math, repo URL parsing, MCP badge rules, error mapping, Markdown export, relative time), the JSON file watchlist store (pin/note roundtrip, corrupt file quarantine, concurrent writes), the server side proxy guards (input validation, per IP rate limiting), and the TanStack Query hooks with a mocked fetch, including an optimistic rollback test that asserts the cache both mid flight and after rejection. CI runs the same suite on every push to main and on pull requests via GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Notes on honesty
 
