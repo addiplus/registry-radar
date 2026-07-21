@@ -69,13 +69,14 @@ The app works with zero configuration: the watchlist falls back to a local JSON 
 npm run test:run
 ```
 
-45 tests across 11 files, all passing. The suites cover the pure transforms (packument mapping, download series math, repo URL parsing, MCP badge rules, error mapping, Markdown export, relative time) and the TanStack Query hooks with a mocked fetch, including an optimistic rollback test that asserts the cache both mid flight and after rejection. CI runs the same suite on every push to main and on pull requests via GitHub Actions (`.github/workflows/ci.yml`).
+48 tests across 12 files, all passing. The suites cover the pure transforms (packument mapping, download series math, repo URL parsing, MCP badge rules, error mapping, Markdown export, relative time), the JSON file watchlist store (pin/note roundtrip, corrupt file quarantine, concurrent writes), and the TanStack Query hooks with a mocked fetch, including an optimistic rollback test that asserts the cache both mid flight and after rejection. CI runs the same suite on every push to main and on pull requests via GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Notes on honesty
 
 - Unauthenticated GitHub API access is 60 requests per hour per IP. The app treats that as a first class state, not a crash: every GitHub response reports its rate limit headers into a small store, a banner counts down to the reset time, stale data stays on screen with a stale-while-error notice, and the refresh button disables while limited.
 - npm download stats lag 1 to 2 days, so labels anchor off the API returned end date ("week ending {end}"), never the local clock. The 90 day series is a custom date range (both ends inclusive) because npm has no 90 day preset.
 - The demo watchlist is shared across all visitors. On Vercel it is stored ephemerally (serverless /tmp) and the UI says so, unless Upstash KV is configured.
+- The watchlist is intentionally shared and world writable for the demo: I let any visitor pin, unpin, or wipe the entire list at any time, since there are no accounts.
 
 ## v2 ideas
 

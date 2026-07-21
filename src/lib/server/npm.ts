@@ -27,8 +27,9 @@ import type {
 const REGISTRY_HOST = 'https://registry.npmjs.org';
 const DOWNLOADS_HOST = 'https://api.npmjs.org';
 
-// Shared revalidate seconds: used for the upstream fetch data cache and for the
-// Cache-Control header on route responses (stale-while-revalidate is 2x per plan section 3).
+// Upstream fetch data-cache TTLs. Route response Cache-Control is deliberately
+// shorter and lives in NPM_CACHE_CONTROL below (security fix G1): the CDN
+// revalidates against these routes, which the fetch cache then answers.
 export const NPM_REVALIDATE = {
   packages: 1800,
   meta: 1800,
@@ -239,21 +240,23 @@ export async function getDownloadSeries(name: string, days: DownloadDays): Promi
 // contract ({ error: { code, message, retryAfter } } with matching status).
 // ---------------------------------------------------------------------------
 
-function cacheControl(revalidate: number): string {
-  return `public, s-maxage=${revalidate}, stale-while-revalidate=${revalidate * 2}`;
-}
+// Successful npm-backed GETs are CDN-cacheable for 300s (npm itself caches
+// registry responses for 300s) with stale-while-revalidate so the CDN absorbs
+// repeat traffic. Errors are explicitly no-store (security fix G1).
+const NPM_CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=600';
+const NO_STORE_HEADERS = { 'Cache-Control': 'no-store' };
 
-export function jsonOk(data: unknown, revalidate: number, etag?: string | null): NextResponse {
-  const headers = new Headers({ 'Cache-Control': cacheControl(revalidate) });
+export function jsonOk(data: unknown, etag?: string | null): NextResponse {
+  const headers = new Headers({ 'Cache-Control': NPM_CACHE_CONTROL });
   if (etag) headers.set('ETag', etag);
   return NextResponse.json(data, { headers });
 }
 
-export function notModifiedIfMatch(request: NextRequest, revalidate: number, etag: string | null): NextResponse | null {
+export function notModifiedIfMatch(request: NextRequest, etag: string | null): NextResponse | null {
   if (!etag) return null;
   const candidate = request.headers.get('if-none-match');
   if (candidate === null || candidate.trim() !== etag) return null;
-  const headers = new Headers({ 'Cache-Control': cacheControl(revalidate), ETag: etag });
+  const headers = new Headers({ 'Cache-Control': NPM_CACHE_CONTROL, ETag: etag });
   return new NextResponse(null, { status: 304, headers });
 }
 
@@ -262,7 +265,7 @@ export function apiErrorResponse(error: unknown): NextResponse {
     const body: ApiErrorBody = {
       error: { code: error.code, message: error.message, retryAfter: error.retryAfter },
     };
-    return NextResponse.json(body, { status: error.status });
+    return NextResponse.json(body, { status: error.status, headers: NO_STORE_HEADERS });
   }
-  return NextResponse.json(npmError(502), { status: 502 });
+  return NextResponse.json(npmError(502), { status: 502, headers: NO_STORE_HEADERS });
 }

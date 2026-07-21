@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 import type { ApiErrorBody } from '@/lib/types';
 import {
@@ -6,11 +6,12 @@ import {
   gitHubCacheHeaders,
   gitHubRouteErrorResponse,
 } from '@/lib/server/github';
-
-// Same rules as the repos route for owner; repo names allow dots and
-// underscores on top of alphanumerics and hyphens.
-const GITHUB_USERNAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
-const GITHUB_REPO_RE = /^[A-Za-z0-9._-]{1,100}$/;
+import {
+  clientIp,
+  getGitHubRateLimiter,
+  rateLimitExceededResponse,
+} from '@/lib/server/rate-limit';
+import { isValidGitHubRepoName, isValidGitHubUsername } from '@/lib/server/validate';
 
 interface RouteContext {
   params: Promise<{ owner: string; repo: string }>;
@@ -26,11 +27,13 @@ function invalidInput(message: string): NextResponse<ApiErrorBody> {
   });
 }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
   const { owner, repo } = await context.params;
-  if (!GITHUB_USERNAME_RE.test(owner) || !GITHUB_REPO_RE.test(repo)) {
+  if (!isValidGitHubUsername(owner) || !isValidGitHubRepoName(repo)) {
     return invalidInput('Invalid GitHub owner or repo name.');
   }
+  const limit = getGitHubRateLimiter().check(clientIp(request));
+  if (!limit.allowed) return rateLimitExceededResponse(limit);
   try {
     const envelope = await getRepoSignals(owner, repo);
     return NextResponse.json(envelope, { headers: gitHubCacheHeaders() });

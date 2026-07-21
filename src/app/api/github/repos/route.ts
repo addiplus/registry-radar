@@ -6,10 +6,12 @@ import {
   gitHubRouteErrorResponse,
   listUserRepos,
 } from '@/lib/server/github';
-
-// GitHub login rules: alphanumeric or single hyphens, no leading or
-// trailing hyphen, 1 to 39 characters.
-const GITHUB_USERNAME_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,37}[a-zA-Z0-9])?$/;
+import {
+  clientIp,
+  getGitHubRateLimiter,
+  rateLimitExceededResponse,
+} from '@/lib/server/rate-limit';
+import { GITHUB_PAGE_MAX, isValidGitHubUsername, parseBoundedInt } from '@/lib/server/validate';
 
 function invalidInput(message: string): NextResponse<ApiErrorBody> {
   const body: ApiErrorBody = {
@@ -24,14 +26,17 @@ function invalidInput(message: string): NextResponse<ApiErrorBody> {
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const user = searchParams.get('user');
-  if (user === null || !GITHUB_USERNAME_RE.test(user)) {
+  if (user === null || !isValidGitHubUsername(user)) {
     return invalidInput('Invalid GitHub username.');
   }
-  const pageRaw = searchParams.get('page');
-  const page = pageRaw === null ? 1 : Number(pageRaw);
-  if (!Number.isInteger(page) || page < 1) {
+  let page: number;
+  try {
+    page = parseBoundedInt(searchParams.get('page'), 1, 1, GITHUB_PAGE_MAX, 'Invalid page number.');
+  } catch {
     return invalidInput('Invalid page number.');
   }
+  const limit = getGitHubRateLimiter().check(clientIp(request));
+  if (!limit.allowed) return rateLimitExceededResponse(limit);
   try {
     const envelope = await listUserRepos(user, page);
     return NextResponse.json(envelope, { headers: gitHubCacheHeaders() });

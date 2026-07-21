@@ -1,19 +1,11 @@
 import { NextResponse } from 'next/server';
 import { ApiError, isApiError } from '@/lib/api-error';
-import { NOTE_MAX_LENGTH } from '@/lib/constants';
+import { readBoundedJsonBody, WATCHLIST_NOTE_MAX_CHARS } from '@/lib/server/validate';
 import { getWatchlistStore } from '@/lib/store';
 import type { ApiErrorBody, WatchlistEntry } from '@/lib/types';
 
 interface RouteContext {
   params: Promise<{ name: string[] }>;
-}
-
-async function readJsonBody(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }
 
 function handleError(error: unknown): NextResponse<ApiErrorBody> {
@@ -52,7 +44,7 @@ export async function PUT(
   try {
     const { name } = await context.params;
     const packageName = name.join('/');
-    const payload = await readJsonBody(request);
+    const payload = await readBoundedJsonBody(request);
     const rawNote =
       typeof payload === 'object' && payload !== null
         ? (payload as { note?: unknown }).note
@@ -61,10 +53,10 @@ export async function PUT(
       throw new ApiError('INVALID_INPUT', 'Note must be a string.', 400);
     }
     const note = rawNote.trim();
-    if (note.length > NOTE_MAX_LENGTH) {
+    if (note.length > WATCHLIST_NOTE_MAX_CHARS) {
       throw new ApiError(
         'INVALID_INPUT',
-        `Note must be ${NOTE_MAX_LENGTH} characters or fewer.`,
+        `Note must be ${WATCHLIST_NOTE_MAX_CHARS} characters or fewer.`,
         400,
       );
     }

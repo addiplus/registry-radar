@@ -19,8 +19,11 @@ export function watchlistToMarkdown(rows: WatchlistRow[]): string {
 
   for (const row of sorted) {
     const name = `[${row.entry.name}](https://www.npmjs.com/package/${row.entry.name})`;
-    const latest = row.meta?.latestVersion ?? '-';
-    const license = row.meta?.license ?? '-';
+    // latestVersion and license are upstream-controlled (npm registry), so
+    // they get the same escaping as notes: a hostile value cannot inject
+    // pipes, headings, or fences into the export.
+    const latest = row.meta?.latestVersion ? escapeCell(row.meta.latestVersion) : '-';
+    const license = row.meta?.license ? escapeCell(row.meta.license) : '-';
     const weekly = row.weeklyDownloads === null ? '-' : String(row.weeklyDownloads);
     const momentum =
       row.momentum === null ? '-' : row.momentum > 0 ? `+${row.momentum}` : String(row.momentum);

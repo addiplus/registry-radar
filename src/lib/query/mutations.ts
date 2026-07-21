@@ -8,6 +8,15 @@ import { qk } from './keys';
 // the optimistic value. onError rolls back from the snapshot. onSettled
 // invalidates the watchlist key only; package data queries are never refetched
 // by mutations.
+//
+// Refinement for overlapping mutations: every optimistic write stamps a
+// monotonically increasing version into its mutation context, tracked per
+// query key. onError restores the snapshot only when this mutation still
+// holds the latest version for the key — i.e. no newer optimistic mutation
+// has started since this one began. Otherwise the restore is skipped, because
+// rolling back would clobber the newer mutation's optimistic write with stale
+// state; the surviving mutation's own onSettled invalidation converges the
+// cache from the server instead.
 
 interface PinVars {
   name: string;
@@ -21,6 +30,23 @@ interface NoteVars {
 
 interface MutationCtx {
   previous: WatchlistResponse | undefined;
+  version: number;
+}
+
+// Optimistic-write versions, one running counter per serialized query key.
+// Version order matches snapshot order because onMutate runs
+// snapshot -> stamp -> write synchronously after the cancelQueries await.
+let versionCounter = 0;
+const latestVersionByKey = new Map<string, number>();
+
+function stampOptimisticVersion(queryKey: readonly unknown[]): number {
+  versionCounter += 1;
+  latestVersionByKey.set(JSON.stringify(queryKey), versionCounter);
+  return versionCounter;
+}
+
+function isLatestOptimisticVersion(queryKey: readonly unknown[], version: number): boolean {
+  return latestVersionByKey.get(JSON.stringify(queryKey)) === version;
 }
 
 function optimisticPin(old: WatchlistResponse | undefined, vars: PinVars): WatchlistResponse | undefined {
@@ -59,11 +85,17 @@ export function usePinMutation() {
     onMutate: async (vars): Promise<MutationCtx> => {
       await queryClient.cancelQueries({ queryKey: qk.watchlist() });
       const previous = queryClient.getQueryData<WatchlistResponse>(qk.watchlist());
+      const version = stampOptimisticVersion(qk.watchlist());
       queryClient.setQueryData<WatchlistResponse>(qk.watchlist(), (old) => optimisticPin(old, vars));
-      return { previous };
+      return { previous, version };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(qk.watchlist(), ctx.previous);
+      // Roll back only if no newer optimistic mutation has started for this
+      // key since this one began; otherwise the newer write wins and the
+      // surviving mutation's onSettled invalidation converges the cache.
+      if (ctx?.previous && isLatestOptimisticVersion(qk.watchlist(), ctx.version)) {
+        queryClient.setQueryData(qk.watchlist(), ctx.previous);
+      }
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: qk.watchlist() });
@@ -78,11 +110,17 @@ export function useNoteMutation() {
     onMutate: async (vars): Promise<MutationCtx> => {
       await queryClient.cancelQueries({ queryKey: qk.watchlist() });
       const previous = queryClient.getQueryData<WatchlistResponse>(qk.watchlist());
+      const version = stampOptimisticVersion(qk.watchlist());
       queryClient.setQueryData<WatchlistResponse>(qk.watchlist(), (old) => optimisticNote(old, vars));
-      return { previous };
+      return { previous, version };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.previous) queryClient.setQueryData(qk.watchlist(), ctx.previous);
+      // Roll back only if no newer optimistic mutation has started for this
+      // key since this one began; otherwise the newer write wins and the
+      // surviving mutation's onSettled invalidation converges the cache.
+      if (ctx?.previous && isLatestOptimisticVersion(qk.watchlist(), ctx.version)) {
+        queryClient.setQueryData(qk.watchlist(), ctx.previous);
+      }
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: qk.watchlist() });

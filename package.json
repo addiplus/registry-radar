@@ -2,6 +2,8 @@
   "name": "registry-radar",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "description": "Live npm and GitHub package health dashboard. Next.js App Router, TypeScript, TanStack Query.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

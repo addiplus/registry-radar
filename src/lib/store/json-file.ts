@@ -20,9 +20,13 @@ function isWatchlistEntry(value: unknown): value is WatchlistEntry {
 
 function parseWatchlistFile(raw: string): WatchlistFileData {
   const parsed: unknown = JSON.parse(raw);
-  if (typeof parsed !== 'object' || parsed === null) return { entries: [] };
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new SyntaxError('watchlist file is not a JSON object');
+  }
   const entries = (parsed as Record<string, unknown>).entries;
-  if (!Array.isArray(entries)) return { entries: [] };
+  if (!Array.isArray(entries)) {
+    throw new SyntaxError('watchlist file has no entries array');
+  }
   return { entries: entries.filter(isWatchlistEntry) };
 }
 
@@ -113,7 +117,33 @@ export class JsonFileWatchlistStore implements WatchlistStore {
       if (isEnoent(error)) return { entries: [] };
       throw error;
     }
-    return parseWatchlistFile(raw);
+    try {
+      return parseWatchlistFile(raw);
+    } catch {
+      // A corrupt file (killed mid-write, hand edit) must not 500 every
+      // watchlist route forever: quarantine it and boot an empty store.
+      await this.quarantineCorruptFile();
+      return { entries: [] };
+    }
+  }
+
+  private async quarantineCorruptFile(): Promise<void> {
+    const quarantinePath = path.join(
+      path.dirname(this.filePath),
+      `${path.basename(this.filePath, '.json')}.corrupt-${Date.now()}.json`,
+    );
+    let quarantined = false;
+    try {
+      await fs.rename(this.filePath, quarantinePath);
+      quarantined = true;
+    } catch {
+      // Best effort only: even when the rename fails we still recover empty.
+    }
+    console.warn(
+      quarantined
+        ? `[registry-radar] corrupt watchlist file moved to ${path.basename(quarantinePath)}; continuing with an empty store`
+        : '[registry-radar] corrupt watchlist file could not be moved; continuing with an empty store',
+    );
   }
 
   // Atomic write: tempfile + rename, so readers never see a partial file.

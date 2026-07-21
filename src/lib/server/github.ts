@@ -161,8 +161,15 @@ export function gitHubRouteErrorResponse(error: unknown): NextResponse<ApiErrorB
   return NextResponse.json(body, { status: 502, headers });
 }
 
+// Successful GitHub-backed GETs: short CDN caching (60s + 120s SWR) so repeat
+// traffic is absorbed without serving stale stars/CI for long; the upstream
+// fetch data cache keeps the longer REVALIDATE_SECONDS TTL, and errors are
+// no-store via gitHubRouteErrorResponse (security fix G1).
+const RESPONSE_S_MAXAGE = 60;
+const RESPONSE_STALE_WHILE_REVALIDATE = 120;
+
 export function gitHubCacheHeaders(): Record<string, string> {
   return {
-    'Cache-Control': `public, s-maxage=${REVALIDATE_SECONDS}, stale-while-revalidate=${REVALIDATE_SECONDS * 2}`,
+    'Cache-Control': `public, s-maxage=${RESPONSE_S_MAXAGE}, stale-while-revalidate=${RESPONSE_STALE_WHILE_REVALIDATE}`,
   };
 }
