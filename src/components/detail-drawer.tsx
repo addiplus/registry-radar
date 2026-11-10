@@ -9,6 +9,7 @@ import {
   useVersionHistory,
   useWatchlist,
 } from '@/lib/query/hooks';
+import { repoCountLabels } from '@/lib/transforms/count-label';
 import { relativeTime } from '@/lib/transforms/relative-time';
 import type { DownloadDays, VersionEntry } from '@/lib/types';
 import { CiBadge } from './ci-badge';
@@ -233,9 +234,9 @@ function DrawerContent({ name, onClose }: { name: string; onClose: () => void })
                     <CiBadge ci={signals.data.ci} />
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    <span>{formatCount(signals.data.stars)} stars</span>
-                    <span>{formatCount(signals.data.forks)} forks</span>
-                    <span>{formatCount(signals.data.openIssuePrCount)} open issues + PRs</span>
+                    {repoCountLabels(signals.data).map((label) => (
+                      <span key={label}>{label}</span>
+                    ))}
                     {signals.data.language !== null && <span>{signals.data.language}</span>}
                     {signals.data.licenseSpdx !== null && <span>{signals.data.licenseSpdx}</span>}
                     <span className="inline-flex items-center gap-1 font-mono">
