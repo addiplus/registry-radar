@@ -2,17 +2,12 @@
 
 import { isApiError } from '@/lib/api-error';
 import { useRepoList, useRepoSignals } from '@/lib/query/hooks';
+import { repoCountLabels } from '@/lib/transforms/count-label';
 import { relativeTime } from '@/lib/transforms/relative-time';
 import type { RepoSummary } from '@/lib/types';
 import { CiBadge } from './ci-badge';
 import { RowSkeleton } from './skeleton';
 import { EmptyState, ErrorState } from './states';
-
-const countFormat = new Intl.NumberFormat('en-US');
-
-function formatCount(n: number): string {
-  return countFormat.format(n);
-}
 
 // Clock read lives here (module scope, same pattern as detail-drawer's
 // relativePush) so render stays pure for the compiler lint rules.
@@ -123,9 +118,9 @@ function RepoRow({ repo }: { repo: RepoSummary }) {
       )}
 
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
-        <span>{formatCount(repo.stars)} stars</span>
-        <span>{formatCount(repo.forks)} forks</span>
-        <span>{formatCount(repo.openIssuePrCount)} open issues + PRs</span>
+        {repoCountLabels(repo).map((label) => (
+          <span key={label}>{label}</span>
+        ))}
         {repo.language !== null && <span>{repo.language}</span>}
         {repo.licenseSpdx !== null && <span>{repo.licenseSpdx}</span>}
         <span className="inline-flex items-center gap-1 font-mono">
